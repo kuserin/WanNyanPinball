@@ -1,167 +1,266 @@
-import UIKit
 import SpriteKit
+
+// MARK: - Physics Categories (全ファイルから参照)
+
+enum PhysicsCategory {
+    static let wall:      UInt32 = 0x1 << 3
+    static let drain:     UInt32 = 0x1 << 4
+    static let slingshot: UInt32 = 0x1 << 5
+}
+
+// MARK: - GameScene
 
 class GameScene: SKScene {
 
-    // MARK: - Nodes
-
-    private var ball: Ball?
-    private var leftFlipper: Flipper!
+    // MARK: Nodes
+    private var leftFlipper:  Flipper!
     private var rightFlipper: Flipper!
-    private var bumpers: [Bumper] = []
+    private var bumpers:      [Bumper] = []
+    private var ball:         Ball?
 
-    // MARK: - UI
+    // MARK: HUD
+    private var scoreLabel:  SKLabelNode!
+    private var ballsLabel:  SKLabelNode!
+    private var comboLabel:  SKLabelNode!
 
-    private var scoreLabel: SKLabelNode!
-    private var ballsLabel: SKLabelNode!
-    private var comboLabel: SKLabelNode!
+    // MARK: State
+    private var gameManager   = GameManager()
+    private var isBallInPlay  = false
 
-    // MARK: - State
-
-    private var gameManager: GameManager!
-    private var isBallInPlay = false
-
-    // MARK: - Layout constants
-
-    private var fieldWidth:  CGFloat { size.width }
-    private var fieldHeight: CGFloat { size.height }
+    // MARK: Layout
+    private let wallThick:   CGFloat = 10
+    private let drainY:      CGFloat = 55
+    private var flipperY:    CGFloat { drainY + 62 }
+    private var launchLaneX: CGFloat { size.width - 22 }
 
     // MARK: - Lifecycle
 
     override func didMove(to view: SKView) {
-        gameManager = GameManager()
-        physicsWorld.gravity     = CGVector(dx: 0, dy: -9.8)
-        physicsWorld.contactDelegate = self
+        physicsWorld.gravity          = CGVector(dx: 0, dy: -18)
+        physicsWorld.contactDelegate  = self
+        physicsWorld.speed            = 1.0
 
-        setupBackground()
-        setupWalls()
-        setupGutter()
-        setupFlippers()
-        setupBumpers()
-        setupHUD()
+        buildBackground()
+        buildWalls()
+        buildDrain()
+        buildSlingshots()
+        buildFlippers()
+        buildBumpers()
+        buildHUD()
         launchBall()
     }
 
-    // MARK: - Scene Setup
+    // MARK: - Background
 
-    private func setupBackground() {
-        backgroundColor = SKColor(red: 0.05, green: 0.05, blue: 0.15, alpha: 1.0)
+    private func buildBackground() {
+        // 濃い紫紺の背景
+        backgroundColor = SKColor(red: 0.06, green: 0.04, blue: 0.18, alpha: 1.0)
 
-        // タイトルロゴ（ベータ用）
+        // 中央レーンを薄く塗って奥行き感を出す
+        let lane = SKShapeNode(rectOf: CGSize(width: size.width - wallThick * 2,
+                                              height: size.height))
+        lane.fillColor   = SKColor(red: 0.08, green: 0.06, blue: 0.22, alpha: 1.0)
+        lane.strokeColor = .clear
+        lane.position    = CGPoint(x: size.width / 2, y: size.height / 2)
+        lane.zPosition   = -10
+        addChild(lane)
+
+        // 発射レーン（右端の細い縦帯）
+        let launchLane = SKShapeNode(rectOf: CGSize(width: 30, height: size.height))
+        launchLane.fillColor   = SKColor(red: 0.12, green: 0.08, blue: 0.28, alpha: 1.0)
+        launchLane.strokeColor = SKColor(white: 1.0, alpha: 0.08)
+        launchLane.lineWidth   = 1
+        launchLane.position    = CGPoint(x: launchLaneX, y: size.height / 2)
+        launchLane.zPosition   = -9
+        addChild(launchLane)
+
+        // フィールドタイトル（薄く）
         let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        title.text = "🐱 Nyan & Wan Pinball 🐶"
-        title.fontSize = 16
-        title.fontColor = .white
-        title.position = CGPoint(x: fieldWidth / 2, y: fieldHeight - 30)
+        title.text      = "🐱 NYAN & WAN 🐶"
+        title.fontSize  = 13
+        title.fontColor = SKColor(white: 1.0, alpha: 0.25)
+        title.position  = CGPoint(x: size.width / 2 - 12, y: size.height - 28)
+        title.zPosition = -5
         addChild(title)
+
+        // ガイドライン（装飾）
+        addGuideLine(y: size.height * 0.50)
+        addGuideLine(y: size.height * 0.35)
     }
 
-    private func setupWalls() {
-        let wallThickness: CGFloat = 8
-        let wallColor = SKColor(red: 0.3, green: 0.3, blue: 0.5, alpha: 1.0)
+    private func addGuideLine(y: CGFloat) {
+        let line = SKShapeNode()
+        let path = CGMutablePath()
+        path.move(to:    CGPoint(x: wallThick + 2, y: y))
+        path.addLine(to: CGPoint(x: size.width - wallThick - 30, y: y))
+        let shape       = SKShapeNode(path: path)
+        shape.strokeColor = SKColor(white: 1.0, alpha: 0.06)
+        shape.lineWidth   = 1
+        shape.zPosition   = -5
+        _ = line
+        addChild(shape)
+    }
 
+    // MARK: - Walls
+
+    private func buildWalls() {
         // 左壁
-        addWall(rect: CGRect(x: 0, y: 0,
-                             width: wallThickness, height: fieldHeight),
-                color: wallColor, name: "wallLeft")
-        // 右壁
-        addWall(rect: CGRect(x: fieldWidth - wallThickness, y: 0,
-                             width: wallThickness, height: fieldHeight),
-                color: wallColor, name: "wallRight")
+        addStaticEdge(
+            from: CGPoint(x: wallThick, y: 0),
+            to:   CGPoint(x: wallThick, y: size.height),
+            color: SKColor(red: 0.3, green: 0.2, blue: 0.6, alpha: 1.0),
+            thickness: wallThick,
+            category: PhysicsCategory.wall
+        )
+        // 右壁（発射レーンの左側まで）
+        addStaticEdge(
+            from: CGPoint(x: size.width - wallThick - 28, y: drainY + 80),
+            to:   CGPoint(x: size.width - wallThick - 28, y: size.height),
+            color: SKColor(red: 0.3, green: 0.2, blue: 0.6, alpha: 1.0),
+            thickness: wallThick,
+            category: PhysicsCategory.wall
+        )
         // 天井
-        addWall(rect: CGRect(x: 0, y: fieldHeight - wallThickness,
-                             width: fieldWidth, height: wallThickness),
-                color: wallColor, name: "wallTop")
+        addStaticEdge(
+            from: CGPoint(x: wallThick, y: size.height - wallThick),
+            to:   CGPoint(x: size.width - wallThick, y: size.height - wallThick),
+            color: SKColor(red: 0.3, green: 0.2, blue: 0.6, alpha: 1.0),
+            thickness: wallThick,
+            category: PhysicsCategory.wall
+        )
+        // 発射レーン右壁
+        addStaticEdge(
+            from: CGPoint(x: size.width - wallThick, y: 0),
+            to:   CGPoint(x: size.width - wallThick, y: size.height),
+            color: SKColor(red: 0.2, green: 0.15, blue: 0.4, alpha: 1.0),
+            thickness: wallThick,
+            category: PhysicsCategory.wall
+        )
+        // 発射レーン仕切り壁の上端を丸く閉じる
+        addStaticEdge(
+            from: CGPoint(x: size.width - wallThick - 28, y: size.height - wallThick),
+            to:   CGPoint(x: size.width - wallThick,     y: size.height - wallThick),
+            color: SKColor(red: 0.3, green: 0.2, blue: 0.6, alpha: 1.0),
+            thickness: wallThick,
+            category: PhysicsCategory.wall
+        )
     }
 
-    private func addWall(rect: CGRect, color: SKColor, name: String) {
-        let node = SKShapeNode(rect: rect)
-        node.fillColor   = color
-        node.strokeColor = .clear
-        node.name        = name
-        node.physicsBody = SKPhysicsBody(edgeLoopFrom: rect)
-        node.physicsBody?.categoryBitMask  = PhysicsCategory.wall
-        node.physicsBody?.isDynamic        = false
-        node.physicsBody?.restitution      = 0.3
-        node.physicsBody?.friction         = 0.1
-        addChild(node)
+    private func addStaticEdge(from a: CGPoint, to b: CGPoint,
+                                color: SKColor, thickness: CGFloat,
+                                category: UInt32) {
+        let shape       = SKShapeNode()
+        let path        = CGMutablePath()
+        path.move(to: a)
+        path.addLine(to: b)
+        shape.path        = path
+        shape.strokeColor = color
+        shape.lineWidth   = thickness
+        shape.lineCap     = .round
+        shape.zPosition   = 1
+
+        shape.physicsBody = SKPhysicsBody(edgeFrom: a, to: b)
+        shape.physicsBody?.categoryBitMask  = category
+        shape.physicsBody?.isDynamic        = false
+        shape.physicsBody?.restitution      = 0.4
+        shape.physicsBody?.friction         = 0.1
+        addChild(shape)
     }
 
-    private func setupGutter() {
-        // ドレイン（ボールロスト領域）
-        let drainY: CGFloat = 40
-        let drain = SKNode()
-        drain.name = "drain"
-        drain.physicsBody = SKPhysicsBody(edgeFrom: CGPoint(x: 0, y: drainY),
-                                          to: CGPoint(x: fieldWidth, y: drainY))
-        drain.physicsBody?.categoryBitMask  = PhysicsCategory.drain
-        drain.physicsBody?.contactTestBitMask = Ball.physicsCategory
-        drain.physicsBody?.isDynamic        = false
-        addChild(drain)
+    // MARK: - Drain
 
-        // 視覚的なドレインライン
-        let drainLine = SKShapeNode()
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 20, y: drainY))
-        path.addLine(to: CGPoint(x: fieldWidth - 20, y: drainY))
+    private func buildDrain() {
+        // ドレインセンサー（不可視）
+        let drainNode       = SKNode()
+        drainNode.name      = "drain"
+        drainNode.physicsBody = SKPhysicsBody(
+            edgeFrom: CGPoint(x: wallThick, y: drainY),
+            to:       CGPoint(x: size.width - wallThick, y: drainY)
+        )
+        drainNode.physicsBody?.categoryBitMask    = PhysicsCategory.drain
+        drainNode.physicsBody?.contactTestBitMask = Ball.physicsCategory
+        drainNode.physicsBody?.isDynamic          = false
+        addChild(drainNode)
+
+        // 視覚ライン
+        let drainLine   = SKShapeNode()
+        let path        = CGMutablePath()
+        path.move(to:    CGPoint(x: wallThick + 5, y: drainY))
+        path.addLine(to: CGPoint(x: size.width - wallThick - 30, y: drainY))
         drainLine.path        = path
-        drainLine.strokeColor = .red
+        drainLine.strokeColor = SKColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 0.7)
         drainLine.lineWidth   = 2
-        drainLine.alpha       = 0.5
+        drainLine.zPosition   = 2
         addChild(drainLine)
-
-        // 左右のスリングショット（ガター壁）
-        addSlingshot(isLeft: true,  drainY: drainY)
-        addSlingshot(isLeft: false, drainY: drainY)
     }
 
-    private func addSlingshot(isLeft: Bool, drainY: CGFloat) {
-        let flipperY = drainY + 80
-        let x: CGFloat = isLeft ? 40 : fieldWidth - 40
-        let topX: CGFloat = isLeft ? 20 : fieldWidth - 20
+    // MARK: - Slingshots
 
-        let node = SKShapeNode()
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: topX, y: flipperY + 50))
-        path.addLine(to: CGPoint(x: x, y: flipperY))
+    private func buildSlingshots() {
+        let topY  = flipperY + 80
+        let botY  = flipperY + 8
+        let leftX = wallThick + 8
+
+        // 左スリングショット
+        addSlingshot(
+            from: CGPoint(x: leftX,       y: topY),
+            to:   CGPoint(x: leftX + 20,  y: botY)
+        )
+        // 右スリングショット
+        let rightX = size.width - wallThick - 36
+        addSlingshot(
+            from: CGPoint(x: rightX,      y: topY),
+            to:   CGPoint(x: rightX - 20, y: botY)
+        )
+    }
+
+    private func addSlingshot(from a: CGPoint, to b: CGPoint) {
+        let node    = SKShapeNode()
+        let path    = CGMutablePath()
+        path.move(to: a)
+        path.addLine(to: b)
         node.path        = path
-        node.strokeColor = SKColor(red: 0.8, green: 0.4, blue: 0.0, alpha: 1.0)
+        node.strokeColor = SKColor(red: 1.0, green: 0.6, blue: 0.1, alpha: 1.0)
         node.lineWidth   = 6
+        node.lineCap     = .round
+        node.zPosition   = 2
         node.name        = "slingshot"
-        node.physicsBody = SKPhysicsBody(edgeFrom: CGPoint(x: topX, y: flipperY + 50),
-                                         to: CGPoint(x: x, y: flipperY))
+
+        node.physicsBody = SKPhysicsBody(edgeFrom: a, to: b)
         node.physicsBody?.categoryBitMask    = PhysicsCategory.slingshot
         node.physicsBody?.contactTestBitMask = Ball.physicsCategory
         node.physicsBody?.isDynamic          = false
-        node.physicsBody?.restitution        = 0.8
+        node.physicsBody?.restitution        = 0.9
+        node.physicsBody?.friction           = 0.0
         addChild(node)
     }
 
-    private func setupFlippers() {
-        let drainY: CGFloat = 40
-        let flipperY = drainY + 60
-        let margin: CGFloat = 70
+    // MARK: - Flippers
+
+    private func buildFlippers() {
+        let halfW = Flipper.width / 2
 
         leftFlipper          = Flipper(side: .left)
-        leftFlipper.position = CGPoint(x: margin, y: flipperY)
+        leftFlipper.position = CGPoint(x: wallThick + halfW + 14, y: flipperY)
         addChild(leftFlipper)
 
         rightFlipper          = Flipper(side: .right)
-        rightFlipper.position = CGPoint(x: fieldWidth - margin, y: flipperY)
+        rightFlipper.position = CGPoint(x: size.width - wallThick - halfW - 36, y: flipperY)
         addChild(rightFlipper)
     }
 
-    private func setupBumpers() {
-        let cx = fieldWidth / 2
-        let cy = fieldHeight * 0.65
+    // MARK: - Bumpers
 
-        // バンパー配置（三角形パターン）
+    private func buildBumpers() {
+        let cx = (size.width - wallThick - 30) / 2 + wallThick
+        let cy = size.height * 0.62
+
         let positions: [(CGFloat, CGFloat)] = [
-            (cx,          cy + 60),
-            (cx - 70,     cy),
-            (cx + 70,     cy),
-            (cx - 35,     cy - 60),
-            (cx + 35,     cy - 60)
+            (cx,       cy + 70),
+            (cx - 72,  cy + 10),
+            (cx + 72,  cy + 10),
+            (cx - 36,  cy - 55),
+            (cx + 36,  cy - 55)
         ]
 
         for (x, y) in positions {
@@ -172,104 +271,199 @@ class GameScene: SKScene {
         }
     }
 
-    private func setupHUD() {
-        // スコアラベル
+    // MARK: - HUD
+
+    private func buildHUD() {
+        let hudBg = SKShapeNode(rectOf: CGSize(width: size.width, height: 44))
+        hudBg.fillColor   = SKColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.55)
+        hudBg.strokeColor = .clear
+        hudBg.position    = CGPoint(x: size.width / 2, y: size.height - 36)
+        hudBg.zPosition   = 50
+        addChild(hudBg)
+
         scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-        scoreLabel.text             = "SCORE: 0"
-        scoreLabel.fontSize         = 18
-        scoreLabel.fontColor        = .white
+        scoreLabel.text               = "SCORE  0"
+        scoreLabel.fontSize           = 17
+        scoreLabel.fontColor          = .white
         scoreLabel.horizontalAlignmentMode = .left
-        scoreLabel.position         = CGPoint(x: 16, y: fieldHeight - 55)
+        scoreLabel.verticalAlignmentMode   = .center
+        scoreLabel.position           = CGPoint(x: wallThick + 8, y: size.height - 36)
+        scoreLabel.zPosition          = 51
         addChild(scoreLabel)
 
-        // ボール残数
         ballsLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-        ballsLabel.text             = "BALLS: 3"
-        ballsLabel.fontSize         = 16
-        ballsLabel.fontColor        = SKColor(red: 0.8, green: 0.8, blue: 0.3, alpha: 1.0)
+        ballsLabel.text               = "●●●"
+        ballsLabel.fontSize           = 16
+        ballsLabel.fontColor          = SKColor(red: 0.4, green: 0.85, blue: 1.0, alpha: 1.0)
         ballsLabel.horizontalAlignmentMode = .right
-        ballsLabel.position         = CGPoint(x: fieldWidth - 16, y: fieldHeight - 55)
+        ballsLabel.verticalAlignmentMode   = .center
+        ballsLabel.position           = CGPoint(x: size.width - 38, y: size.height - 36)
+        ballsLabel.zPosition          = 51
         addChild(ballsLabel)
 
-        // コンボラベル
         comboLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        comboLabel.text    = ""
-        comboLabel.fontSize = 22
+        comboLabel.text      = ""
+        comboLabel.fontSize  = 22
         comboLabel.fontColor = .yellow
-        comboLabel.position  = CGPoint(x: fieldWidth / 2, y: fieldHeight * 0.45)
+        comboLabel.position  = CGPoint(x: size.width / 2 - 14, y: size.height * 0.44)
         comboLabel.alpha     = 0
+        comboLabel.zPosition = 30
         addChild(comboLabel)
     }
 
-    // MARK: - Ball Management
+    // MARK: - Ball
 
     private func launchBall() {
         guard !isBallInPlay else { return }
 
-        let newBall = Ball()
-        let launchX = fieldWidth - 30
-        let launchY: CGFloat = 120
-        newBall.position = CGPoint(x: launchX, y: launchY)
+        let newBall       = Ball()
+        newBall.position  = CGPoint(x: launchLaneX - 4, y: flipperY + 50)
+        newBall.zPosition = 10
         addChild(newBall)
-        ball = newBall
+        ball         = newBall
         isBallInPlay = true
 
-        newBall.physicsBody?.applyImpulse(CGVector(dx: -2, dy: 500))
+        // 少し待ってから発射（物理安定後）
+        let wait    = SKAction.wait(forDuration: 0.15)
+        let impulse = SKAction.run { [weak newBall] in
+            newBall?.physicsBody?.applyImpulse(CGVector(dx: -3, dy: 480))
+        }
+        run(SKAction.sequence([wait, impulse]))
     }
 
     private func ballLost() {
+        guard isBallInPlay else { return }
         isBallInPlay = false
-        ball?.removeFromParent()
+        ball?.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: 0.15),
+            SKAction.removeFromParent()
+        ]))
         ball = nil
 
         let remaining = gameManager.ballLost()
-        ballsLabel.text = "BALLS: \(remaining)"
+        updateBallsDisplay(remaining: remaining)
 
         if remaining > 0 {
-            let wait = SKAction.wait(forDuration: 1.5)
-            let relaunch = SKAction.run { [weak self] in self?.launchBall() }
-            run(SKAction.sequence([wait, relaunch]))
+            showBanner(text: "BALL LOST!", color: .red)
+            run(SKAction.sequence([
+                SKAction.wait(forDuration: 1.8),
+                SKAction.run { [weak self] in self?.launchBall() }
+            ]))
         } else {
-            gameOver()
+            showGameOver()
         }
     }
 
-    private func gameOver() {
-        let overlay = SKShapeNode(rect: CGRect(origin: .zero, size: size))
+    // MARK: - HUD Update
+
+    private func updateHUD() {
+        scoreLabel.text = "SCORE  \(gameManager.score)"
+    }
+
+    private func updateBallsDisplay(remaining: Int) {
+        ballsLabel.text = String(repeating: "●", count: remaining)
+    }
+
+    private func showBanner(text: String, color: SKColor) {
+        comboLabel.text      = text
+        comboLabel.fontColor = color
+        comboLabel.alpha     = 1.0
+        comboLabel.run(SKAction.sequence([
+            SKAction.wait(forDuration: 1.0),
+            SKAction.fadeOut(withDuration: 0.4)
+        ]))
+    }
+
+    // MARK: - Game Over
+
+    private func showGameOver() {
+        physicsWorld.speed = 0
+
+        let overlay = SKShapeNode(rectOf: size)
         overlay.fillColor = .black
         overlay.alpha     = 0
+        overlay.position  = CGPoint(x: size.width / 2, y: size.height / 2)
+        overlay.zPosition = 90
         addChild(overlay)
-        overlay.run(SKAction.fadeAlpha(to: 0.65, duration: 0.5))
 
-        let msg = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        msg.text     = "GAME OVER"
-        msg.fontSize = 36
-        msg.fontColor = .red
-        msg.position  = CGPoint(x: fieldWidth / 2, y: fieldHeight / 2 + 30)
-        msg.alpha     = 0
-        addChild(msg)
-        msg.run(SKAction.fadeIn(withDuration: 0.5))
+        overlay.run(SKAction.fadeAlpha(to: 0.72, duration: 0.45))
 
-        let finalScore = SKLabelNode(fontNamed: "AvenirNext-Bold")
-        finalScore.text      = "SCORE: \(gameManager.score)"
-        finalScore.fontSize  = 24
-        finalScore.fontColor = .white
-        finalScore.position  = CGPoint(x: fieldWidth / 2, y: fieldHeight / 2 - 10)
-        finalScore.alpha     = 0
-        addChild(finalScore)
-        finalScore.run(SKAction.sequence([
+        let over = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        over.text      = "GAME OVER"
+        over.fontSize  = 38
+        over.fontColor = SKColor(red: 1.0, green: 0.25, blue: 0.25, alpha: 1.0)
+        over.position  = CGPoint(x: size.width / 2, y: size.height / 2 + 45)
+        over.zPosition = 91
+        over.alpha     = 0
+        addChild(over)
+
+        let finalLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        finalLabel.text      = "SCORE  \(gameManager.score)"
+        finalLabel.fontSize  = 26
+        finalLabel.fontColor = .white
+        finalLabel.position  = CGPoint(x: size.width / 2, y: size.height / 2)
+        finalLabel.zPosition = 91
+        finalLabel.alpha     = 0
+        addChild(finalLabel)
+
+        let restartLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        restartLabel.text      = "TAP TO RESTART"
+        restartLabel.fontSize  = 16
+        restartLabel.fontColor = SKColor(white: 0.8, alpha: 1.0)
+        restartLabel.position  = CGPoint(x: size.width / 2, y: size.height / 2 - 55)
+        restartLabel.zPosition = 91
+        restartLabel.name      = "restartLabel"
+        restartLabel.alpha     = 0
+        addChild(restartLabel)
+
+        let appear = SKAction.sequence([
             SKAction.wait(forDuration: 0.3),
-            SKAction.fadeIn(withDuration: 0.5)
-        ]))
+            SKAction.fadeIn(withDuration: 0.4)
+        ])
+        over.run(appear)
+        finalLabel.run(SKAction.sequence([SKAction.wait(forDuration: 0.5), SKAction.fadeIn(withDuration: 0.4)]))
+        restartLabel.run(SKAction.sequence([SKAction.wait(forDuration: 0.9), SKAction.fadeIn(withDuration: 0.4)]))
+    }
+
+    private func restartGame() {
+        removeAllChildren()
+        removeAllActions()
+        gameManager.reset()
+        physicsWorld.speed = 1.0
+
+        buildBackground()
+        buildWalls()
+        buildDrain()
+        buildSlingshots()
+        buildFlippers()
+        buildBumpers()
+        buildHUD()
+        launchBall()
+    }
+
+    // MARK: - Character Event
+
+    private func triggerCharacterEvent() {
+        gameManager.addScore(10_000)
+        updateHUD()
+        showBanner(text: "✨ キャラクター出現！ ✨", color: .yellow)
+        // TODO: CharacterManager と連携してキャラクターノードを表示する
     }
 
     // MARK: - Input
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
-        let x = touch.location(in: self).x
+        let loc = touch.location(in: self)
 
-        if x < fieldWidth / 2 {
+        // ゲームオーバー後のリスタート
+        if nodes(at: loc).contains(where: { $0.name == "restartLabel" }) ||
+           physicsWorld.speed == 0 {
+            restartGame()
+            return
+        }
+
+        if loc.x < size.width / 2 {
             leftFlipper.activate()
         } else {
             rightFlipper.activate()
@@ -278,9 +472,9 @@ class GameScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
-        let x = touch.location(in: self).x
+        let loc = touch.location(in: self)
 
-        if x < fieldWidth / 2 {
+        if loc.x < size.width / 2 {
             leftFlipper.deactivate()
         } else {
             rightFlipper.deactivate()
@@ -288,23 +482,8 @@ class GameScene: SKScene {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        leftFlipper.deactivate()
-        rightFlipper.deactivate()
-    }
-
-    // MARK: - HUD Update
-
-    private func updateHUD() {
-        scoreLabel.text = "SCORE: \(gameManager.score)"
-    }
-
-    private func showCombo(text: String) {
-        comboLabel.text  = text
-        comboLabel.alpha = 1.0
-        comboLabel.run(SKAction.sequence([
-            SKAction.wait(forDuration: 0.8),
-            SKAction.fadeOut(withDuration: 0.4)
-        ]))
+        leftFlipper?.deactivate()
+        rightFlipper?.deactivate()
     }
 }
 
@@ -313,52 +492,45 @@ class GameScene: SKScene {
 extension GameScene: SKPhysicsContactDelegate {
 
     func didBegin(_ contact: SKPhysicsContact) {
-        let bodyA = contact.bodyA
-        let bodyB = contact.bodyB
+        let masks = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
 
-        // ボールがドレインに触れた
-        if bodyA.categoryBitMask == PhysicsCategory.drain ||
-           bodyB.categoryBitMask == PhysicsCategory.drain {
-            ballLost()
+        // ドレイン接触
+        if masks & PhysicsCategory.drain != 0 {
+            DispatchQueue.main.async { [weak self] in self?.ballLost() }
             return
         }
 
-        // ボールがバンパーに当たった
-        let bumperBody = bodyA.categoryBitMask == Bumper.physicsCategory ? bodyA : bodyB
-        if bumperBody.categoryBitMask == Bumper.physicsCategory,
-           let bumperNode = bumperBody.node as? Bumper {
+        // バンパー接触
+        if masks & Bumper.physicsCategory != 0 {
+            let bumperBody = contact.bodyA.categoryBitMask == Bumper.physicsCategory
+                ? contact.bodyA : contact.bodyB
+            if let bumper = bumperBody.node as? Bumper {
+                let gained = bumper.onHit()
+                gameManager.addScore(gained)
+                updateHUD()
 
-            let gained = bumperNode.onHit()
-            gameManager.addScore(gained)
-            updateHUD()
-
-            // バンパーを一定数叩くとイベント発火
-            if bumperNode.reachedEventThreshold {
-                bumperNode.resetHitCount()
-                triggerCharacterEvent()
+                if bumper.reachedEventThreshold {
+                    bumper.resetHitCount()
+                    triggerCharacterEvent()
+                }
             }
         }
 
-        // スリングショット
-        if bodyA.categoryBitMask == PhysicsCategory.slingshot ||
-           bodyB.categoryBitMask == PhysicsCategory.slingshot {
+        // スリングショット接触
+        if masks & PhysicsCategory.slingshot != 0 {
             gameManager.addScore(50)
             updateHUD()
+            // スリングショット光らせる
+            let slingshotBody = contact.bodyA.categoryBitMask == PhysicsCategory.slingshot
+                ? contact.bodyA : contact.bodyB
+            if let node = slingshotBody.node as? SKShapeNode {
+                let orig = node.strokeColor
+                node.strokeColor = .white
+                node.run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.1),
+                    SKAction.run { node.strokeColor = orig }
+                ]))
+            }
         }
     }
-
-    private func triggerCharacterEvent() {
-        showCombo(text: "✨ キャラクター出現！ ✨")
-        gameManager.addScore(10_000)
-        updateHUD()
-        // TODO: CharacterManager と連携してキャラクターを表示する
-    }
-}
-
-// MARK: - Physics Categories
-
-enum PhysicsCategory {
-    static let wall:       UInt32 = 0x1 << 3
-    static let drain:      UInt32 = 0x1 << 4
-    static let slingshot:  UInt32 = 0x1 << 5
 }
