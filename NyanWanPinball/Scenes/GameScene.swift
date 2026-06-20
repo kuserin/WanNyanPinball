@@ -36,6 +36,8 @@ class GameScene: SKScene {
     // MARK: - Lifecycle
 
     override func didMove(to view: SKView) {
+        print("[GameScene] didMove — scene size: \(size)")
+
         physicsWorld.gravity          = CGVector(dx: 0, dy: -18)
         physicsWorld.contactDelegate  = self
         physicsWorld.speed            = 1.0
@@ -53,13 +55,13 @@ class GameScene: SKScene {
     // MARK: - Background
 
     private func buildBackground() {
-        // 濃い紫紺の背景
-        backgroundColor = SKColor(red: 0.06, green: 0.04, blue: 0.18, alpha: 1.0)
+        // はっきりした紫（デバッグ用）
+        backgroundColor = .purple
 
-        // 中央レーンを薄く塗って奥行き感を出す
+        // 中央レーン（見やすい明るめの紫）
         let lane = SKShapeNode(rectOf: CGSize(width: size.width - wallThick * 2,
                                               height: size.height))
-        lane.fillColor   = SKColor(red: 0.08, green: 0.06, blue: 0.22, alpha: 1.0)
+        lane.fillColor   = SKColor(red: 0.45, green: 0.15, blue: 0.65, alpha: 1.0)
         lane.strokeColor = .clear
         lane.position    = CGPoint(x: size.width / 2, y: size.height / 2)
         lane.zPosition   = -10
@@ -67,8 +69,8 @@ class GameScene: SKScene {
 
         // 発射レーン（右端の細い縦帯）
         let launchLane = SKShapeNode(rectOf: CGSize(width: 30, height: size.height))
-        launchLane.fillColor   = SKColor(red: 0.12, green: 0.08, blue: 0.28, alpha: 1.0)
-        launchLane.strokeColor = SKColor(white: 1.0, alpha: 0.08)
+        launchLane.fillColor   = SKColor(red: 0.35, green: 0.10, blue: 0.50, alpha: 1.0)
+        launchLane.strokeColor = SKColor(white: 1.0, alpha: 0.4)
         launchLane.lineWidth   = 1
         launchLane.position    = CGPoint(x: launchLaneX, y: size.height / 2)
         launchLane.zPosition   = -9
@@ -247,6 +249,9 @@ class GameScene: SKScene {
         rightFlipper          = Flipper(side: .right)
         rightFlipper.position = CGPoint(x: size.width - wallThick - halfW - 36, y: flipperY)
         addChild(rightFlipper)
+
+        print("[Flipper] left  pos=\(leftFlipper.position)  flipperY=\(flipperY)")
+        print("[Flipper] right pos=\(rightFlipper.position)  sceneW=\(size.width)")
     }
 
     // MARK: - Bumpers
@@ -322,6 +327,8 @@ class GameScene: SKScene {
         addChild(newBall)
         ball         = newBall
         isBallInPlay = true
+
+        print("[Ball] spawned at \(newBall.position)  radius=\(Ball.radius)  sceneSize=\(size)")
 
         // 少し待ってから発射（物理安定後）
         let wait    = SKAction.wait(forDuration: 0.15)
